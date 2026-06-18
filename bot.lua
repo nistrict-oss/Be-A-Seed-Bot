@@ -99,14 +99,18 @@ end
 
 -- Read Config (.env)
 local env = {}
-for line in io.lines('.env') do
-    local k, v = line:match("^([^#=%s]+)=([^#\r\n]+)")
-    if k and v then env[k] = v end
+local file = io.open('.env', 'r')
+if file then
+    for line in file:lines() do
+        local k, v = line:match("^([^#=%s]+)=([^#\r\n]+)")
+        if k and v then env[k] = v end
+    end
+    file:close()
 end
 
-local EVENT_CHANNEL_ID = env.EVENT_CHANNEL_ID
-local EVENT_ROLE_ID = env.EVENT_ROLE_ID
-local TOKEN = env.DISCORD_TOKEN
+local EVENT_CHANNEL_ID = env.EVENT_CHANNEL_ID or os.getenv("EVENT_CHANNEL_ID")
+local EVENT_ROLE_ID = env.EVENT_ROLE_ID or os.getenv("EVENT_ROLE_ID")
+local TOKEN = env.DISCORD_TOKEN or os.getenv("DISCORD_TOKEN")
 
 local EVENT_COLORS = {
     Silver = 0xC0C0C0, Taco = 0xF4A460, Alien = 0x7CFC00, Gold = 0xFFD700,
