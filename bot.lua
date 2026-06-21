@@ -3,6 +3,24 @@ local timer = require("timer")
 local ffi = require("ffi")
 local bit = require("bit")
 
+-- Discordia 2.13.1 has no native slash-command support. Unknown gateway events
+-- fall through EventHandler's metatable, so we hook INTERACTION_CREATE and surface
+-- it as a normal client event ('interactionCreate'). The required module resolves
+-- to the same cached table the internal Shard uses, so this patch is shared.
+do
+    local ok, EventHandler = pcall(require, 'discordia/libs/client/EventHandler')
+    if not ok then
+        ok, EventHandler = pcall(require, './deps/discordia/libs/client/EventHandler.lua')
+    end
+    if ok and EventHandler then
+        EventHandler.INTERACTION_CREATE = function(d, client)
+            client:emit('interactionCreate', d)
+        end
+    else
+        print('WARNING: could not hook INTERACTION_CREATE; slash commands will not respond.')
+    end
+end
+
 -- FFI PCG32 implementation mimicking Roblox's Random.new (53-bit precision)
 local function RobloxRandom(seed)
     local self = {}
@@ -97,6 +115,29 @@ local function getCycleInfo(unixTime)
     return cycleIndex, event, phase, secLeft
 end
 
+-- Searches forward from a cycle index for the next cycle whose event matches.
+local MAX_SEARCH = 500000
+local function findNextOccurrence(targetEvent, fromCycle)
+    for i = 0, MAX_SEARCH do
+        local ci = fromCycle + i
+        if getDeterministicEvent(ci) == targetEvent then
+            return ci
+        end
+    end
+    return nil
+end
+
+-- Active phase start/end (unix) for a given cycle index.
+local function cycleTimes(cycleIndex)
+    local cycleStart = cycleIndex * TOTAL_CYCLE_SEC
+    return cycleStart, cycleStart + COOLDOWN_SEC, cycleStart + TOTAL_CYCLE_SEC
+end
+
+-- Discord dynamic timestamp markdown (localizes per viewer). style: F, f, R, T, etc.
+local function ts(unix, style)
+    return "<t:" .. math.floor(unix) .. ":" .. (style or "F") .. ">"
+end
+
 -- Read Config (.env)
 local env = {}
 local file = io.open('.env', 'r')
@@ -122,9 +163,167 @@ local client = discordia.Client()
 local lastStartingSoonCycle = -1
 local lastActiveCycle = -1
 
+-- Slash command definitions ------------------------------------------------
+local eventChoices = {}
+for _, name in ipairs(sortedKeys) do
+    table.insert(eventChoices, { name = name, value = name })
+end
+
+local SLASH_COMMANDS = {
+    {
+        name = "nextevent",
+        description = "Show the next upcoming event (optionally for a specific event)",
+        options = {
+            {
+                type = 3, -- STRING
+                name = "event",
+                description = "Filter to a specific event",
+                required = false,
+                choices = eventChoices,
+            },
+        },
+    },
+    {
+        name = "currentevent",
+        description = "Show the event happening right now and time remaining",
+    },
+    {
+        name = "upcoming",
+        description = "List the next several upcoming events",
+        options = {
+            {
+                type = 4, -- INTEGER
+                name = "count",
+                description = "How many events to list (1-15, default 5)",
+                required = false,
+            },
+        },
+    },
+}
+
+-- Bulk-overwrites guild commands for every guild the bot is in (instant update).
+local function registerCommands()
+    local appId = client.user.id
+    for guild in client.guilds:iter() do
+        local _, err = client._api:request('PUT',
+            '/applications/' .. appId .. '/guilds/' .. guild.id .. '/commands',
+            SLASH_COMMANDS)
+        if err then
+            print('Failed to register commands in ' .. guild.name .. ': ' .. tostring(err))
+        else
+            print('Registered slash commands in ' .. guild.name)
+        end
+    end
+end
+
+local function getOption(d, name)
+    if not (d.data and d.data.options) then return nil end
+    for _, opt in ipairs(d.data.options) do
+        if opt.name == name then return opt.value end
+    end
+    return nil
+end
+
+local function respondInteraction(d, embed)
+    embed.timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    local _, err = client._api:request('POST',
+        '/interactions/' .. d.id .. '/' .. d.token .. '/callback',
+        { type = 4, data = { embeds = { embed } } })
+    if err then
+        print('Failed to respond to interaction: ' .. tostring(err))
+    end
+end
+
+client:on('interactionCreate', function(d)
+    if d.type ~= 2 then return end -- 2 = APPLICATION_COMMAND
+    local name = d.data and d.data.name
+    local now = os.time()
+    local cycleIndex = math.floor(now / TOTAL_CYCLE_SEC)
+    local timeInCycle = now % TOTAL_CYCLE_SEC
+    -- The next cycle whose event has not yet started.
+    local startCycle = (timeInCycle < COOLDOWN_SEC) and cycleIndex or (cycleIndex + 1)
+
+    if name == "currentevent" then
+        local _, event, phase = getCycleInfo(now)
+        local _, activeStart, activeEnd = cycleTimes(cycleIndex)
+        local color = EVENT_COLORS[event] or 0x808080
+        if phase == "active" then
+            respondInteraction(d, {
+                title = event .. " Event is ACTIVE",
+                description = "**" .. event .. "** is happening right now!\nEnds " ..
+                    ts(activeEnd, "R") .. " (" .. ts(activeEnd, "T") .. ").",
+                color = color,
+            })
+        else
+            respondInteraction(d, {
+                title = event .. " Event is in cooldown",
+                description = "**" .. event .. "** begins " ..
+                    ts(activeStart, "R") .. " (" .. ts(activeStart, "F") .. ").",
+                color = color,
+            })
+        end
+
+    elseif name == "nextevent" then
+        local filter = getOption(d, "event")
+        if filter then
+            local found = findNextOccurrence(filter, cycleIndex)
+            if not found then
+                respondInteraction(d, {
+                    title = "No upcoming " .. filter .. " event found",
+                    color = 0x808080,
+                })
+                return
+            end
+            local _, activeStart, activeEnd = cycleTimes(found)
+            local color = EVENT_COLORS[filter] or 0x808080
+            local desc
+            if now >= activeStart and now < activeEnd then
+                desc = "**" .. filter .. "** is active right now! Ends " .. ts(activeEnd, "R") .. "."
+            else
+                desc = "Starts " .. ts(activeStart, "R") .. " (" .. ts(activeStart, "F") .. ")\n" ..
+                       "Ends " .. ts(activeEnd, "T") .. "."
+            end
+            respondInteraction(d, {
+                title = "Next " .. filter .. " Event",
+                description = desc,
+                color = color,
+            })
+        else
+            local event = getDeterministicEvent(startCycle)
+            local _, activeStart, activeEnd = cycleTimes(startCycle)
+            respondInteraction(d, {
+                title = "Next Event: " .. event,
+                description = "**" .. event .. "** begins " .. ts(activeStart, "R") ..
+                    " (" .. ts(activeStart, "F") .. ")\nEnds " .. ts(activeEnd, "T") .. ".",
+                color = EVENT_COLORS[event] or 0x808080,
+            })
+        end
+
+    elseif name == "upcoming" then
+        local count = getOption(d, "count") or 5
+        if count < 1 then count = 1 end
+        if count > 15 then count = 15 end
+        local lines = {}
+        for i = 0, count - 1 do
+            local ci = startCycle + i
+            local event = getDeterministicEvent(ci)
+            local _, activeStart = cycleTimes(ci)
+            table.insert(lines, "**" .. event .. "** - " .. ts(activeStart, "R") ..
+                " (" .. ts(activeStart, "f") .. ")")
+        end
+        respondInteraction(d, {
+            title = "Upcoming Events",
+            description = table.concat(lines, "\n"),
+            color = 0x5865F2,
+        })
+    end
+end)
+
 client:on('ready', function()
     print('Logged in as ' .. client.user.username)
     print('Event loop running! (Powered by Luvit & Discordia)')
+
+    registerCommands()
     
     timer.setInterval(5000, function()
         coroutine.wrap(function()
