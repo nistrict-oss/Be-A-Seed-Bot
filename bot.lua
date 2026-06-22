@@ -81,10 +81,9 @@ local SECRET_SALT = 848123
 
 local EVENT_WEIGHTS = {
     Silver = 200, Taco = 50, Alien = 25, Gold = 150,
-    Diamond = 100, Ruby = 30, Galaxy = 20, Aquatic = 10, ["Black Hole"] = 15,
-    -- Petalune = 10, -- DISABLED until the update is published (keeps schedule in sync with the live game)
+    Diamond = 100, Ruby = 30, Galaxy = 20, Aquatic = 10, ["Black Hole"] = 15, Petalune = 10,
 }
-local sortedKeys = { "Alien", "Aquatic", "Black Hole", "Diamond", "Galaxy", "Gold", "Ruby", "Silver", "Taco" }
+local sortedKeys = { "Alien", "Aquatic", "Black Hole", "Diamond", "Galaxy", "Gold", "Petalune", "Ruby", "Silver", "Taco" }
 local TOTAL_WEIGHT = 0
 for _, k in ipairs(sortedKeys) do TOTAL_WEIGHT = TOTAL_WEIGHT + EVENT_WEIGHTS[k] end
 
@@ -340,7 +339,7 @@ client:on('ready', function()
             if phase == "cooldown" and cycleIndex ~= lastStartingSoonCycle then
                 lastStartingSoonCycle = cycleIndex
                 local content = nil
-                if event == "Aquatic" or event == "Black Hole" then
+                if event == "Aquatic" or event == "Black Hole" or event == "Petalune" then
                     content = roleMention
                 end
                 
