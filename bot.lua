@@ -82,8 +82,9 @@ local SECRET_SALT = 848123
 local EVENT_WEIGHTS = {
     Silver = 200, Taco = 50, Alien = 25, Gold = 150,
     Diamond = 100, Ruby = 30, Galaxy = 20, Aquatic = 10, ["Black Hole"] = 15, Petalune = 10,
+    Hell = 5, Crystal = 2,
 }
-local sortedKeys = { "Alien", "Aquatic", "Black Hole", "Diamond", "Galaxy", "Gold", "Petalune", "Ruby", "Silver", "Taco" }
+local sortedKeys = { "Alien", "Aquatic", "Black Hole", "Crystal", "Diamond", "Galaxy", "Gold", "Hell", "Petalune", "Ruby", "Silver", "Taco" }
 local TOTAL_WEIGHT = 0
 for _, k in ipairs(sortedKeys) do TOTAL_WEIGHT = TOTAL_WEIGHT + EVENT_WEIGHTS[k] end
 
@@ -157,6 +158,7 @@ local EVENT_COLORS = {
     Silver = 0xC0C0C0, Taco = 0xF4A460, Alien = 0x7CFC00, Gold = 0xFFD700,
     Diamond = 0x00BFFF, Ruby = 0xDC143C, Galaxy = 0x8A2BE2, Aquatic = 0x00CED1,
     ["Black Hole"] = 0x1C1C1C, Petalune = 0xFF69B4,
+    Hell = 0xCC2200, Crystal = 0xB8E0FF,
 }
 
 local client = discordia.Client()
@@ -339,7 +341,7 @@ client:on('ready', function()
             if phase == "cooldown" and cycleIndex ~= lastStartingSoonCycle then
                 lastStartingSoonCycle = cycleIndex
                 local content = nil
-                if event == "Aquatic" or event == "Black Hole" or event == "Petalune" then
+                if event == "Aquatic" or event == "Petalune" or event == "Hell" or event == "Crystal" then
                     content = roleMention
                 end
                 
