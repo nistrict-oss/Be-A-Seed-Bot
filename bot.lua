@@ -82,7 +82,7 @@ local SECRET_SALT = 848123
 local EVENT_WEIGHTS = {
     Silver = 200, Taco = 50, Alien = 25, Gold = 150,
     Diamond = 100, Ruby = 30, Galaxy = 20, Aquatic = 10, ["Black Hole"] = 15, Petalune = 10,
-    Hell = 5, Crystal = 2,
+    Hell = 10, Crystal = 10,
 }
 local sortedKeys = { "Alien", "Aquatic", "Black Hole", "Crystal", "Diamond", "Galaxy", "Gold", "Hell", "Petalune", "Ruby", "Silver", "Taco" }
 local TOTAL_WEIGHT = 0
